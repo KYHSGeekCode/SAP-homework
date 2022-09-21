@@ -15,13 +15,13 @@ impl Transaction {
 
     /// Starts the transaction.
     ///
-    /// Returns `true` if the transaction has started.
+    /// Returns `true` if the transaction has started by the method call.
     pub fn start(&mut self) -> bool {
         if self.state == State::Inactive {
             self.state = State::Active;
             true
         } else {
-            self.state == State::Active
+            false
         }
     }
 
@@ -46,13 +46,13 @@ impl Transaction {
 
     /// Prepares the transaction for commit.
     ///
-    /// Returns `true` if the transaction is prepared for commit.
+    /// Returns `true` if the transaction is prepared for commit by the method call.
     pub fn prepare(&mut self) -> bool {
         if self.state == State::Active {
             self.state = State::Prepared;
             true
         } else {
-            self.state == State::Prepared
+            false
         }
     }
 
@@ -76,17 +76,27 @@ impl Transaction {
     }
 
     /// Commits the transaction.
-    pub fn commit(&mut self) {
+    ///
+    /// Returns `true` if the transaction has been committed by the method call.
+    pub fn commit(&mut self) -> bool {
         if self.state == State::Prepared {
             self.state = State::Committed;
+            true
+        } else {
+            false
         }
     }
 
     /// Rolls back the transaction.
-    pub fn rollback(&mut self) {
-        if !self.state.is_terminal() {
+    ///
+    /// Returns `true` if the transaction has been rolled back by the method call.
+    pub fn rollback(&mut self) -> bool {
+        // TODO: is this condition OK?
+        if self.state != State::RolledBack {
             self.state = State::RolledBack;
+            return true;
         }
+        false
     }
 }
 
@@ -120,6 +130,9 @@ pub enum State {
 
 impl State {
     /// Returns `true` if it is a terminal state.
+    ///
+    /// TODO: when shall this method be called?
+    #[allow(dead_code)]
     pub fn is_terminal(self) -> bool {
         matches!(self, Self::Committed | Self::RolledBack)
     }
@@ -134,28 +147,61 @@ mod test {
     quickcheck! { fn prop_api_safety(xs: Vec<usize>) -> bool { check_api_safety(&xs) } }
 
     fn check_api_safety(seq: &[usize]) -> bool {
+        let mut started = false;
+        let mut prepared = false;
+        let mut committed = false;
+        let mut rolled_back = false;
         let mut transaction = Transaction::default();
         !seq.iter().any(|op_code| {
             // Returns `true` if it detects anything illegal.
             match op_code % 4 {
                 0 => {
                     // 0 => start.
-                    !transaction.start()
+                    if started {
+                        transaction.start()
+                    } else if transaction.start() {
+                        started = true;
+                        false
+                    } else {
+                        false
+                    }
                 }
                 1 => {
                     // 1 => prepare.
-                    transaction.prepare();
-                    false
+                    if prepared {
+                        transaction.prepare()
+                    } else if transaction.prepare() {
+                        prepared = true;
+                        false
+                    } else {
+                        false
+                    }
                 }
                 2 => {
                     // 2 => commit.
-                    transaction.commit();
-                    false
+                    if committed {
+                        transaction.commit()
+                    } else if transaction.commit() {
+                        committed = true;
+
+                        // A rolled back transaction should never be committed.
+                        rolled_back
+                    } else {
+                        false
+                    }
                 }
                 _ => {
                     // 3 => rollback.
-                    transaction.rollback();
-                    false
+                    if rolled_back {
+                        transaction.rollback()
+                    } else if transaction.rollback() {
+                        rolled_back = true;
+
+                        // A committed transaction should never be rolled back.
+                        committed
+                    } else {
+                        false
+                    }
                 }
             }
         })

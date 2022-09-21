@@ -35,6 +35,8 @@ pub struct Node {
     transaction: Transaction,
 
     /// The persistent storage of the node.
+    ///
+    /// TODO: what to store?
     #[allow(dead_code)]
     persistency: Vec<Action>,
 }
@@ -230,7 +232,8 @@ impl TransactionModel {
         let mut new_node_state = node.clone();
 
         // Make sure that the transaction is active.
-        if new_node_state.transaction.start() {
+        new_node_state.transaction.start();
+        if new_node_state.transaction.state() == TransactionState::Active {
             new_node_state
                 .transaction
                 .add_participant(participant_node_id);
