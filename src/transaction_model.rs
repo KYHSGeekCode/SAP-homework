@@ -29,30 +29,38 @@ use std::hash::{Hash, Hasher};
 
 use stateright::{Model, Property};
 
-#[derive(Clone, Debug, Default, Eq)]
+#[derive(Clone, Debug, Eq)]
 pub struct Node {
+    /// The node identifier.
+    id: usize,
+
     /// The only transaction on the node.
     transaction: Transaction,
 
     /// The persistent storage of the node.
-    ///
-    /// TODO: what to store?
-    #[allow(dead_code)]
     persistency: Vec<Action>,
+}
+
+impl Node {
+    /// Creates a new [`Node`] instance.
+    pub fn with_id(id: usize) -> Node {
+        Node {
+            id,
+            transaction: Transaction::default(),
+            persistency: Vec::default(),
+        }
+    }
 }
 
 impl Hash for Node {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.transaction.hash(state);
-        for record in &self.persistency {
-            record.hash(state);
-        }
     }
 }
 
 impl PartialEq for Node {
     fn eq(&self, other: &Self) -> bool {
-        self.transaction == other.transaction && self.persistency == other.persistency
+        self.transaction == other.transaction
     }
 }
 
@@ -237,6 +245,11 @@ impl TransactionModel {
             new_node_state
                 .transaction
                 .add_participant(participant_node_id);
+
+            // Record the transaction state change: a new participant added.
+            new_node_state
+                .persistency
+                .push(Action::RequestJoin(participant_node_id));
         }
 
         new_node_state
@@ -246,7 +259,12 @@ impl TransactionModel {
         let mut new_node_state = node.clone();
 
         // The coordinator knows that this node participates in the distributed transaction.
-        new_node_state.transaction.start();
+        if new_node_state.transaction.start() {
+            // Record the transaction state change: a transaction started in the node.
+            new_node_state
+                .persistency
+                .push(Action::Start(new_node_state.id));
+        }
 
         new_node_state
     }
@@ -255,7 +273,12 @@ impl TransactionModel {
         let mut new_node_state = node.clone();
 
         // Prepare the transaction for commit.
-        new_node_state.transaction.prepare();
+        if new_node_state.transaction.prepare() {
+            // Record the transaction state change: the transaction is prepared for commit.
+            new_node_state
+                .persistency
+                .push(Action::RequestPrepare(new_node_state.id));
+        }
 
         new_node_state
     }
@@ -272,7 +295,12 @@ impl TransactionModel {
         let mut new_node_state = node.clone();
 
         // Commit the transaction.
-        new_node_state.transaction.commit();
+        if new_node_state.transaction.commit() {
+            // Record the transaction state change: the transaction is committed.
+            new_node_state
+                .persistency
+                .push(Action::Commit(new_node_state.id));
+        }
 
         new_node_state
     }
@@ -281,7 +309,12 @@ impl TransactionModel {
         let mut new_node_state = node.clone();
 
         // Rollback the transaction.
-        new_node_state.transaction.rollback();
+        if new_node_state.transaction.rollback() {
+            // Record the transaction state change: the transaction is rolled back.
+            new_node_state
+                .persistency
+                .push(Action::Rollback(new_node_state.id));
+        }
 
         new_node_state
     }
@@ -292,7 +325,6 @@ impl TransactionModel {
         // Reset the transaction.
         new_node_state.transaction = Transaction::default();
 
-        //
         // TODO: how to make it work??
 
         new_node_state
@@ -305,8 +337,8 @@ impl Model for TransactionModel {
 
     fn init_states(&self) -> Vec<Self::State> {
         let mut node_map: Vec<Node> = Vec::with_capacity(self.num_nodes);
-        for _ in 0..self.num_nodes {
-            node_map.push(Node::default());
+        for id in 0..self.num_nodes {
+            node_map.push(Node::with_id(id));
         }
         vec![System { node_map }]
     }
